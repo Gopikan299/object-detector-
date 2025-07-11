@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Object Detection</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #ffebee;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .upload-box {
+      background: #ffffff;
+      border: 2px dashed #ff8a80;
+      border-radius: 8px;
+      width: 500px;
+      max-width: 90%;
+      text-align: center;
+      padding: 30px;
+      transition: all 0.3s;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .upload-box.dragover {
+      border-color: #ff5252;
+      background: #ffcdd2;
+    }
+    .results-container {
+      display: flex;
+      width: 500px;
+      max-width: 90%;
+      gap: 20px;
+    }
+    .preview-box, .results-box {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      flex: 1;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .icons {
+      font-size: 64px;
+      margin: 20px 0;
+      color: #ff5252;
+    }
+    .icons label {
+      cursor: pointer;
+      margin: 0 10px;
+    }
+    h2, h3 {
+      color: #d32f2f;
+    }
+    p {
+      color: #5d4037;
+    }
+    label[for="fileUpload"], label[for="cameraInput"] {
+      color: #e53935;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    label[for="fileUpload"]:hover, label[for="cameraInput"]:hover {
+      text-decoration: underline;
+    }
+    input[type="file"] {
+      display: none;
+    }
+    #imagePreview {
+      max-width: 100%;
+      max-height: 300px;
+      margin-top: 10px;
+      border-radius: 4px;
+      display: none;
+    }
+    .file-info {
+      margin: 10px 0;
+      color: #5d4037;
+    }
+    .detection-item {
+      margin: 8px 0;
+      padding: 8px;
+      background: #fce4ec;
+      border-radius: 4px;
+    }
+    /* Camera modal styles */
+    .camera-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.9);
+      z-index: 1000;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .camera-modal.active {
+      display: flex;
+    }
+    #cameraVideo {
+      max-width: 90%;
+      max-height: 70vh;
+      background: black;
+    }
+    .camera-controls {
+      margin-top: 20px;
+      display: flex;
+      gap: 20px;
+    }
+    .camera-btn {
+      padding: 10px 20px;
+      background: #ff5252;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="upload-box" id="uploadBox">
+    <h2>Upload Image for Detection</h2>
+    <div class="icons">
+      <label for="cameraInput">📷</label>
+      <label for="fileUpload">📁</label>
+    </div>
+    <p>
+      Or drag and drop image here, or <label for="fileUpload">browse</label> your computer.
+    </p>
+    <input type="file" id="fileUpload" accept="image/*">
+    <input type="file" id="cameraInput" accept="image/*">
+    <div class="file-info" id="fileInfo"></div>
+  </div>
+
+  <div class="results-container">
+    <div class="preview-box">
+      <h3>Image Preview</h3>
+      <img id="imagePreview" alt="Preview will appear here">
+    </div>
+    <div class="results-box">
+      <h3>Detection Results</h3>
+      <div id="detectionResults"></div>
+    </div>
+  </div>
+
+  <!-- Camera Modal -->
+  <div class="camera-modal" id="cameraModal">
+    <video id="cameraVideo" autoplay playsinline></video>
+    <div class="camera-controls">
+      <button class="camera-btn" id="captureBtn">Capture</button>
+      <button class="camera-btn" id="cancelCameraBtn">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    const uploadBox = document.getElementById('uploadBox');
+    const fileInput = document.getElementById('fileUpload');
+    const cameraInput = document.getElementById('cameraInput');
+    const fileInfo = document.getElementById('fileInfo');
+    const imagePreview = document.getElementById('imagePreview');
+    const detectionResults = document.getElementById('detectionResults');
+    const cameraModal = document.getElementById('cameraModal');
+    const cameraVideo = document.getElementById('cameraVideo');
+    const captureBtn = document.getElementById('captureBtn');
+    const cancelCameraBtn = document.getElementById('cancelCameraBtn');
+    let cameraStream = null;
+
+    // Handle file selection
+    fileInput.addEventListener('change', async () => {
+      if (fileInput.files.length > 0) {
+        await processImage(fileInput.files[0]);
+      }
+    });
+
+    // Handle camera selection
+    cameraInput.addEventListener('change', async () => {
+      if (cameraInput.files.length > 0) {
+        await processImage(cameraInput.files[0]);
+      }
+    });
+
+    // Camera icon click handler
+    document.querySelector('label[for="cameraInput"]').addEventListener('click', (e) => {
+      e.preventDefault();
+      startCamera();
+    });
+
+    // Drag and drop handlers
+    uploadBox.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadBox.classList.add('dragover');
+    });
+
+    uploadBox.addEventListener('dragleave', () => {
+      uploadBox.classList.remove('dragover');
+    });
+
+    uploadBox.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      uploadBox.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        await processImage(e.dataTransfer.files[0]);
+      }
+    });
+
+    // Camera functions
+    async function startCamera() {
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: 'environment' },
+          audio: false 
+        });
+        cameraVideo.srcObject = cameraStream;
+        cameraModal.classList.add('active');
+      } catch (err) {
+        console.error("Camera error:", err);
+        // Fallback to regular file input
+        cameraInput.click();
+      }
+    }
+
+    // Capture button handler
+    captureBtn.addEventListener('click', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = cameraVideo.videoWidth;
+      canvas.height = cameraVideo.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(cameraVideo, 0, 0, canvas.width, canvas.height);
+      
+      canvas.toBlob(async (blob) => {
+        stopCamera();
+        await processImage(new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' }));
+      }, 'image/jpeg', 0.9);
+    });
+
+    // Cancel button handler
+    cancelCameraBtn.addEventListener('click', stopCamera);
+
+    function stopCamera() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+      cameraModal.classList.remove('active');
+    }
+
+    async function processImage(file) {
+      if (!file.type.match('image.*')) {
+        detectionResults.innerHTML = '<div class="detection-item" style="color:red">Please upload an image file</div>';
+        return;
+      }
+
+      // Show file info and preview
+      fileInfo.innerHTML = `<strong>Selected file:</strong> ${file.name}`;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        imagePreview.src = e.target.result;
+        imagePreview.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+
+      detectionResults.innerHTML = '<div class="detection-item">Processing image...</div>';
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('http://localhost:8000/detect', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        displayResults(data.detections);
+      } catch (error) {
+        console.error('Error:', error);
+        detectionResults.innerHTML = `<div class="detection-item" style="color:red">Error: ${error.message}</div>`;
+      }
+    }
+
+    function displayResults(detections) {
+      if (!detections || !detections.length) {
+        detectionResults.innerHTML = '<div class="detection-item">No objects detected</div>';
+        return;
+      }
+      detectionResults.innerHTML = detections.map(det =>
+        `<div class="detection-item"><strong>${det.class}</strong> (${Math.round(det.confidence * 100)}% confidence)</div>`
+      ).join('');
+    }
+  </script>
+</body>
+</html>
